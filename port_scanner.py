@@ -5,6 +5,88 @@ from datetime import datetime
 import threading
 from queue import Queue
 
+def classify_os(ttl, window_size, tcp_options=None):
+    """
+    OS classification based on TTL, window size and TCP options
+    ttl: int - IP TTL from the response
+    window_size: int - TCP window size
+    tcp_options: list of str - e.g., ['MSS', 'SACK', 'TS', 'WS']
+    """
+    # Normalize TTL if needed
+    if ttl >= 128:
+        ttl_class = "high"
+    elif ttl >= 64:
+        ttl_class = "medium"
+    else:
+        ttl_class = "low"
+
+    # Windows fingerprints
+    if ttl_class == "high":
+        if window_size in (64240, 8192, 65535):
+            return "Windows (likely)"
+        elif window_size > 65535:
+            return "Windows (likely)"
+        else:
+            return "Windows or unknown"
+    
+    # Linux/Unix fingerprints
+    elif ttl_class == "medium":
+        if window_size in (5840, 29200, 14600, 65535):
+            if tcp_options:
+                if "TS" in tcp_options and "WS" in tcp_options:
+                    return "Linux/Unix (likely)"
+                elif "MSS" in tcp_options and "SACK" in tcp_options:
+                    return "macOS or Linux"
+            return "Linux/Unix (maybe)"
+        elif 16384 <= window_size <= 65535:
+            return "Linux/Unix (likely)"
+    
+    # Network devices and unusual configurations
+    elif ttl_class == "low":
+        if window_size in (4128, 16384):
+            return "Cisco or network device"
+        else:
+            return "Unusual config or embedded OS"
+
+    return "OS Unknown"
+
+def get_tcp_options(sock):
+    """Get TCP options from socket"""
+    options = []
+    try:
+        # Check for MSS
+        mss = sock.getsockopt(socket.IPPROTO_TCP, socket.TCP_MAXSEG)
+        if mss > 0:
+            options.append("MSS")
+        
+        # Check for window scaling
+        try:
+            ws = sock.getsockopt(socket.IPPROTO_TCP, socket.TCP_WINDOW_CLAMP)
+            if ws > 0:
+                options.append("WS")
+        except:
+            pass
+
+        # Check for timestamp
+        try:
+            ts = sock.getsockopt(socket.IPPROTO_TCP, socket.TCP_TIMESTAMP)
+            if ts > 0:
+                options.append("TS")
+        except:
+            pass
+
+        # Check for SACK
+        try:
+            sack = sock.getsockopt(socket.IPPROTO_TCP, socket.TCP_SACK)
+            if sack > 0:
+                options.append("SACK")
+        except:
+            pass
+
+    except:
+        pass
+    return options
+
 def detect_os(target):
     """TCP tabanlı işletim sistemi tespiti"""
     print("\n" + "=" * 60)
@@ -22,37 +104,20 @@ def detect_os(target):
                 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 sock.settimeout(2)
                 if sock.connect_ex((target, port)) == 0:
-                    # Servis banner'ını almaya çalış
-                    banner = get_service_banner(sock)
-                    if banner:
-                        banner = banner.lower()
-                        if any(x in banner for x in ['windows', 'iis', 'microsoft', 'asp.net']):
-                            print("[*] TCP banner'ı Windows işaret ediyor")
-                            return "Windows"
-                        elif any(x in banner for x in ['apache', 'nginx', 'linux', 'ubuntu', 'debian', 'centos', 'redhat', 'fedora', 'suse']):
-                            print("[*] TCP banner'ı Linux/Unix işaret ediyor")
-                            return "Linux/Unix"
-                        elif any(x in banner for x in ['macos', 'darwin', 'apple', 'afp', 'bonjour']):
-                            print("[*] TCP banner'ı macOS işaret ediyor")
-                            return "macOS"
-                
-                # TCP pencere boyutunu al
-                window_size = sock.getsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF)
-                tcp_options = sock.getsockopt(socket.IPPROTO_TCP, socket.TCP_MAXSEG)
-                
-                # TCP pencere boyutuna göre işletim sistemi tahmini
-                if window_size > 65535:
-                    # Windows genellikle daha büyük pencere boyutları kullanır
-                    print("[*] TCP pencere boyutu Windows işaret ediyor")
-                    return "Windows"
-                elif 16384 <= window_size <= 65535 or tcp_options == 1460:
-                    # Linux genellikle bu aralıkta pencere boyutları kullanır
-                    print("[*] TCP pencere boyutu Linux/Unix işaret ediyor")
-                    return "Linux/Unix"
-                elif window_size > 0 or tcp_options == 1440:
-                    # macOS genellikle daha küçük pencere boyutları kullanır
-                    print("[*] TCP pencere boyutu macOS işaret ediyor")
-                    return "macOS"
+                    # Get TTL from the connection
+                    ttl = sock.getsockopt(socket.IPPROTO_IP, socket.IP_TTL)
+                    
+                    # Get window size
+                    window_size = sock.getsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF)
+                    
+                    # Get TCP options
+                    tcp_options = get_tcp_options(sock)
+                    
+                    # Classify OS
+                    os_type = classify_os(ttl, window_size, tcp_options)
+                    print(f"[*] TTL: {ttl}, Window Size: {window_size}, TCP Options: {tcp_options}")
+                    print(f"[*] Detected OS: {os_type}")
+                    return os_type
                 
                 sock.close()
             except:
