@@ -29,7 +29,7 @@ def detect_os(target):
                         if any(x in banner for x in ['windows', 'iis', 'microsoft', 'asp.net']):
                             print("[*] TCP banner'ı Windows işaret ediyor")
                             return "Windows"
-                        elif any(x in banner for x in ['apache', 'nginx', 'linux', 'ubuntu', 'debian']):
+                        elif any(x in banner for x in ['apache', 'nginx', 'linux', 'ubuntu', 'debian', 'centos', 'redhat', 'fedora', 'suse']):
                             print("[*] TCP banner'ı Linux/Unix işaret ediyor")
                             return "Linux/Unix"
                         elif any(x in banner for x in ['macos', 'darwin', 'apple', 'afp', 'bonjour']):
@@ -38,28 +38,21 @@ def detect_os(target):
                 
                 # TCP pencere boyutunu al
                 window_size = sock.getsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF)
+                tcp_options = sock.getsockopt(socket.IPPROTO_TCP, socket.TCP_MAXSEG)
                 
                 # TCP pencere boyutuna göre işletim sistemi tahmini
                 if window_size > 65535:
+                    # Windows genellikle daha büyük pencere boyutları kullanır
                     print("[*] TCP pencere boyutu Windows işaret ediyor")
                     return "Windows"
-                elif 32768 <= window_size <= 65535:
-                    print("[*] TCP pencere boyutu macOS işaret ediyor")
-                    return "macOS"
-                elif window_size > 0:
+                elif 16384 <= window_size <= 65535 or tcp_options == 1460:
+                    # Linux genellikle bu aralıkta pencere boyutları kullanır
                     print("[*] TCP pencere boyutu Linux/Unix işaret ediyor")
                     return "Linux/Unix"
-                
-                # TCP seçeneklerini kontrol et
-                try:
-                    tcp_options = sock.getsockopt(socket.IPPROTO_TCP, socket.TCP_MAXSEG)
-                    if tcp_options > 0:
-                        # macOS genellikle belirli TCP seçenekleri kullanır
-                        if tcp_options == 1460:  # macOS'un tipik MSS değeri
-                            print("[*] TCP seçenekleri macOS işaret ediyor")
-                            return "macOS"
-                except:
-                    pass
+                elif window_size > 0 or tcp_options == 1440:
+                    # macOS genellikle daha küçük pencere boyutları kullanır
+                    print("[*] TCP pencere boyutu macOS işaret ediyor")
+                    return "macOS"
                 
                 sock.close()
             except:
