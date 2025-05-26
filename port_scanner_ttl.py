@@ -10,10 +10,11 @@ def ttl_os_detection(ip):
     """Detect operating system using TTL value from ICMP response"""
     print(f"\n🧠 TTL-based OS detection for {ip}")
 
+    # First try ICMP (ping)
     try:
         # Create raw socket for ICMP Echo Request (Ping)
         s = socket.socket(socket.AF_INET, socket.SOCK_RAW, socket.IPPROTO_ICMP)
-        s.settimeout(1)
+        s.settimeout(2)  # Increased timeout
 
         # ICMP header (type, code, checksum, id, sequence number)
         icmp_header = struct.pack('!BBHHH', 8, 0, 0, 1, 1)
@@ -39,13 +40,69 @@ def ttl_os_detection(ip):
 
     except PermissionError:
         print("⛔ Administrator/root privileges required for this operation")
-        return "Detection failed (Admin privileges required)"
     except socket.timeout:
-        print("⏱ No response received. TTL detection failed")
-        return "Detection failed (No response)"
+        print("⏱ No ICMP response received. Trying alternative methods...")
     except Exception as e:
-        print("⚠ Error occurred:", e)
-        return "Detection failed"
+        print("⚠ ICMP Error:", e)
+    
+    # If ICMP fails, try TCP-based detection
+    print("\nTrying TCP-based detection...")
+    try:
+        # Try common ports that might give us OS information
+        test_ports = [80, 443, 22, 445, 3389]
+        for port in test_ports:
+            try:
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.settimeout(2)
+                if sock.connect_ex((ip, port)) == 0:
+                    # Try to get the service banner
+                    banner = get_service_banner(sock)
+                    if banner:
+                        banner = banner.lower()
+                        # Check for Windows-specific signatures
+                        if any(x in banner for x in ['windows', 'iis', 'microsoft', 'asp.net']):
+                            print("💡 TCP banner suggests: Windows")
+                            return "Windows"
+                        # Check for Linux/Unix-specific signatures
+                        elif any(x in banner for x in ['apache', 'nginx', 'linux', 'ubuntu', 'debian']):
+                            print("💡 TCP banner suggests: Linux/Unix")
+                            return "Linux/Unix"
+                
+                # Get TCP window size
+                window_size = sock.getsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF)
+                if window_size > 65535:
+                    print("💡 TCP window size suggests: Windows")
+                    return "Windows"
+                elif window_size > 0:
+                    print("💡 TCP window size suggests: Linux/Unix")
+                    return "Linux/Unix"
+                
+                sock.close()
+            except:
+                continue
+            finally:
+                try:
+                    sock.close()
+                except:
+                    pass
+    except Exception as e:
+        print("⚠ TCP detection error:", e)
+    
+    # If all methods fail, try to check if the host is alive using TCP
+    print("\nChecking if host is alive...")
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(2)
+        result = sock.connect_ex((ip, 80))
+        if result == 0:
+            print("✅ Host is alive but OS detection failed")
+        else:
+            print("❌ Host appears to be down or blocking connections")
+        sock.close()
+    except:
+        print("❌ Could not establish connection to host")
+    
+    return "Detection failed (Host might be blocking ICMP and TCP probes)"
 
 def get_ip_from_domain(domain):
     """Convert domain name to IP address"""
