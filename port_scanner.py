@@ -5,150 +5,208 @@ from datetime import datetime
 import threading
 from queue import Queue
 import struct
-import random
+
+def detect_os(target):
+    """TCP tabanlı işletim sistemi tespiti"""
+    print("\n" + "=" * 60)
+    print(f"İŞLETİM SİSTEMİ TESPİTİ: {target}")
+    print("=" * 60)
+
+    # TTL tabanlı işletim sistemi tespiti
+    print("\n[+] TTL tabanlı işletim sistemi tespiti yapılıyor...")
+    print("-" * 60)
+    
+    try:
+        # ICMP echo request gönder
+        sock = socket.socket(socket.AF_INET, socket.SOCK_RAW, socket.IPPROTO_ICMP)
+        sock.settimeout(2)
+        
+        # ICMP echo request paketi oluştur
+        icmp_type = 8  # Echo request
+        icmp_code = 0
+        icmp_checksum = 0
+        icmp_id = 1
+        icmp_seq = 1
+        
+        # ICMP header'ı oluştur
+        icmp_header = struct.pack('!BBHHH', icmp_type, icmp_code, icmp_checksum, icmp_id, icmp_seq)
+        
+        # Paketi gönder
+        sock.sendto(icmp_header, (target, 0))
+        
+        # Yanıtı al
+        try:
+            data, addr = sock.recvfrom(1024)
+            # IP header'ından TTL değerini al
+            ttl = struct.unpack('!B', data[8:9])[0]
+            
+            # TTL değerine göre işletim sistemi tahmini
+            if ttl <= 64:
+                print("[*] TTL değeri (64) Linux/Unix işaret ediyor")
+                return "Linux/Unix"
+            elif ttl <= 128:
+                print("[*] TTL değeri (128) Windows işaret ediyor")
+                return "Windows"
+            elif ttl <= 255:
+                print("[*] TTL değeri (255) macOS işaret ediyor")
+                return "macOS"
+        except socket.timeout:
+            print("[!] TTL tespiti için yanıt alınamadı")
+        finally:
+            sock.close()
+    except Exception as e:
+        print(f"[!] TTL tespit hatası: {e}")
+
+    # Eğer TTL tespiti başarısız olursa, diğer yöntemlere geç
+    print("\n[+] Alternatif tespit yöntemleri deneniyor...")
+    print("-" * 60)
+
+    try:
+        # İşletim sistemi bilgisi verebilecek yaygın portları dene
+        test_ports = [80, 443, 22, 445, 3389, 548]  
+        print("\n[+] Port taraması başlatılıyor...")
+        print("-" * 60)
+        
+        for port in test_ports:
+            try:
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.settimeout(2)
+                if sock.connect_ex((target, port)) == 0:
+                    # Servis banner'ını almaya çalış
+                    banner = get_service_banner(sock)
+                    if banner:
+                        banner = banner.lower()
+                        if any(x in banner for x in ['windows', 'iis', 'microsoft', 'asp.net']):
+                            print("[*] TCP banner'ı Windows işaret ediyor")
+                            return "Windows"
+                        elif any(x in banner for x in ['apache', 'nginx', 'linux', 'ubuntu', 'debian']):
+                            print("[*] TCP banner'ı Linux/Unix işaret ediyor")
+                            return "Linux/Unix"
+                        elif any(x in banner for x in ['macos', 'darwin', 'apple', 'afp', 'bonjour']):
+                            print("[*] TCP banner'ı macOS işaret ediyor")
+                            return "macOS"
+                
+                # TCP pencere boyutunu al
+                window_size = sock.getsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF)
+                
+                # TCP pencere boyutuna göre işletim sistemi tahmini
+                if window_size > 65535:
+                    print("[*] TCP pencere boyutu Windows işaret ediyor")
+                    return "Windows"
+                elif 32768 <= window_size <= 65535:
+                    print("[*] TCP pencere boyutu macOS işaret ediyor")
+                    return "macOS"
+                elif window_size > 0:
+                    print("[*] TCP pencere boyutu Linux/Unix işaret ediyor")
+                    return "Linux/Unix"
+                
+                # TCP seçeneklerini kontrol et
+                try:
+                    tcp_options = sock.getsockopt(socket.IPPROTO_TCP, socket.TCP_MAXSEG)
+                    if tcp_options > 0:
+                        # macOS genellikle belirli TCP seçenekleri kullanır
+                        if tcp_options == 1460:  # macOS'un tipik MSS değeri
+                            print("[*] TCP seçenekleri macOS işaret ediyor")
+                            return "macOS"
+                except:
+                    pass
+                
+                sock.close()
+            except:
+                continue
+            finally:
+                try:
+                    sock.close()
+                except:
+                    pass
+    except Exception as e:
+        print(f"[!] TCP tespit hatası: {e}")
+    
+    # Host'un ayakta olup olmadığını kontrol et
+    print("\n[+] Host durumu kontrol ediliyor...")
+    print("-" * 60)
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(2)
+        result = sock.connect_ex((target, 80))
+        if result == 0:
+            print("[*] Host ayakta fakat işletim sistemi tespiti başarısız")
+        else:
+            print("[!] Host kapalı")
+        sock.close()
+    except:
+        print("[!] Host'a bağlantı kurulamadı")
+    
+    return "Tespit başarısız"
 
 def get_ip_from_domain(domain):
-    """Convert domain name to IP address"""
+    """Alan adını IP adresine dönüştür"""
     try:
         return socket.gethostbyname(domain)
     except socket.gaierror:
-        print("Error: Could not resolve hostname")
+        print("Hata: Alan adı çözümlenemedi")
         sys.exit(1)
 
 def get_service_banner(sock):
-    """Attempt to get service banner from the socket"""
+    """Socket'ten servis banner'ını almaya çalış"""
     try:
-        # Set a short timeout for receiving the banner
         sock.settimeout(2)
-        # Try to receive up to 1024 bytes
         banner = sock.recv(1024)
         if banner:
-            # Decode and clean the banner
             return banner.decode('utf-8', errors='ignore').strip()
     except:
         pass
     return None
 
 def scan_port(target, port, open_ports):
-    """Scan a single port and identify the service"""
+    """Tek bir portu tara ve servisi belirle"""
     try:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.settimeout(1)
         result = sock.connect_ex((target, port))
         if result == 0:
-            # Try to get the service banner
+            # Servis banner'ını almaya çalış
             banner = get_service_banner(sock)
             if banner:
-                service_info = f"Service: {banner}"
+                service_info = f"Servis: {banner}"
             else:
-                # If no banner, try to get service name from socket
+                # Socket'ten servis adını almaya çalış
                 try:
                     service = socket.getservbyport(port)
-                    service_info = f"Service: {service}"
+                    service_info = f"Servis: {service}"
                 except:
-                    service_info = "Service: Unknown"
+                    service_info = "Servis: Bilinmiyor"
             open_ports.append((port, service_info))
         sock.close()
     except:
         pass
 
-def detect_os(target):
-    """Detect operating system using TCP/IP stack behavior analysis"""
-    try:
-        # Try to connect to common ports and analyze responses
-        os_signatures = {
-            'Windows': {
-                'ttl': 128,
-                'window_size': 65535,
-                'flags': 0x02
-            },
-            'Linux/Unix': {
-                'ttl': 64,
-                'window_size': 5840,
-                'flags': 0x02
-            }
-        }
-        
-        # Try multiple ports for better accuracy
-        test_ports = [80, 443, 22]
-        responses = []
-        
-        for port in test_ports:
-            try:
-                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                sock.settimeout(1)
-                result = sock.connect_ex((target, port))
-                if result == 0:
-                    # Get the service banner if available
-                    banner = get_service_banner(sock)
-                    if banner:
-                        responses.append(banner.lower())
-                sock.close()
-            except:
-                continue
-        
-        # Analyze responses for OS signatures
-        if responses:
-            # Check for Windows-specific signatures
-            windows_sigs = ['windows', 'iis', 'microsoft', 'asp.net']
-            linux_sigs = ['apache', 'nginx', 'linux', 'ubuntu', 'debian', 'centos']
-            
-            for response in responses:
-                for sig in windows_sigs:
-                    if sig in response:
-                        return "Windows"
-                for sig in linux_sigs:
-                    if sig in response:
-                        return "Linux/Unix"
-        
-        # If no clear signature found, try TCP/IP stack behavior
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(1)
-        sock.connect((target, 80))
-        
-        # Get socket options
-        ttl = sock.getsockopt(socket.IPPROTO_IP, socket.IP_TTL)
-        window_size = sock.getsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF)
-        
-        # Compare with known signatures
-        for os_name, sig in os_signatures.items():
-            if abs(ttl - sig['ttl']) <= 10:  # Allow some margin of error
-                return os_name
-        
-        return "Unknown OS (Could not determine with certainty)"
-            
-    except Exception as e:
-        return "Detection failed (Try running with administrator privileges)"
-    finally:
-        try:
-            sock.close()
-        except:
-            pass
-
 def port_scanner(target, start_port=1, end_port=1024):
-    """Main port scanning function"""
-    # Convert domain to IP if necessary
+    """Ana port tarama fonksiyonu"""
     try:
         target_ip = socket.inet_aton(target)
         target_ip = target
     except socket.error:
         target_ip = get_ip_from_domain(target)
 
-    print(f"\nStarting port scan for {target} ({target_ip})")
-    print(f"Scan started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    print("-" * 50)
+    print("\n" + "=" * 60)
+    print(f"PORT TARAMA BAŞLATILIYOR: {target} ({target_ip})")
+    print("=" * 60)
+    print(f"Başlangıç zamanı: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"Port aralığı: {start_port}-{end_port}")
+    print("-" * 60)
     
-    # Detect OS
-    print("Detecting operating system...")
+    # İşletim sistemi tespiti
     os_type = detect_os(target_ip)
-    print(f"Detected OS: {os_type}")
-    print("-" * 50)
+    print("\n" + "=" * 60)
+    print(f"TESPİT EDİLEN İŞLETİM SİSTEMİ: {os_type}")
+    print("=" * 60)
 
     open_ports = []
     threads = []
     q = Queue()
 
-    # Create thread pool
+    # Thread havuzu oluştur
     for port in range(start_port, end_port + 1):
         q.put(port)
 
@@ -158,32 +216,43 @@ def port_scanner(target, start_port=1, end_port=1024):
             scan_port(target_ip, port, open_ports)
             q.task_done()
 
-    # Start threads
-    for _ in range(100):  # Limit to 100 concurrent threads
+    # Thread'leri başlat
+    print("\n[+] Port taraması başlatılıyor...")
+    for _ in range(100): 
         t = threading.Thread(target=worker)
         t.daemon = True
         threads.append(t)
         t.start()
 
-    # Wait for all threads to complete
+    # Tüm thread'lerin tamamlanmasını bekle
     for t in threads:
         t.join()
 
-    # Print results
+    # Sonuçları yazdır
+    print("\n" + "=" * 60)
+    print("TARAMA SONUÇLARI")
+    print("=" * 60)
+    
     if open_ports:
-        print("\nOpen ports and services:")
-        print("-" * 50)
+        print("\nAÇIK PORTLAR VE SERVİSLER:")
+        print("-" * 60)
         for port, service in sorted(open_ports):
-            print(f"Port {port}: {service}")
+            print(f"[+] Port {port}: {service}")
     else:
-        print("\nNo open ports found in the specified range.")
+        print("\n[!] Belirtilen aralıkta açık port bulunamadı.")
 
-    print(f"\nScan completed at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print("\n" + "=" * 60)
+    print(f"TARAMA TAMAMLANDI: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print("=" * 60)
 
 def main():
     if len(sys.argv) < 2:
-        print("Usage: python port_scanner.py <target> [start_port] [end_port]")
-        print("Example: python port_scanner.py example.com 1 1024")
+        print("\n" + "=" * 60)
+        print("KULLANIM")
+        print("=" * 60)
+        print("python port_scanner_ttl.py <OP_adresi> [baslangic_portu] [bitis_portu]")
+        print("Örnek: python port_scanner_ttl.py example.com 1 1024")
+        print("=" * 60)
         sys.exit(1)
 
     target = sys.argv[1]
@@ -194,3 +263,5 @@ def main():
 
 if __name__ == "__main__":
     main() 
+
+    
