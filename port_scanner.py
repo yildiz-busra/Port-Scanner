@@ -4,62 +4,12 @@ import time
 from datetime import datetime
 import threading
 from queue import Queue
-import struct
 
 def detect_os(target):
     """TCP tabanlı işletim sistemi tespiti"""
     print("\n" + "=" * 60)
     print(f"İŞLETİM SİSTEMİ TESPİTİ: {target}")
     print("=" * 60)
-
-    # TTL tabanlı işletim sistemi tespiti
-    print("\n[+] TTL tabanlı işletim sistemi tespiti yapılıyor...")
-    print("-" * 60)
-    
-    try:
-        # ICMP echo request gönder
-        sock = socket.socket(socket.AF_INET, socket.SOCK_RAW, socket.IPPROTO_ICMP)
-        sock.settimeout(2)
-        
-        # ICMP echo request paketi oluştur
-        icmp_type = 8  # Echo request
-        icmp_code = 0
-        icmp_checksum = 0
-        icmp_id = 1
-        icmp_seq = 1
-        
-        # ICMP header'ı oluştur
-        icmp_header = struct.pack('!BBHHH', icmp_type, icmp_code, icmp_checksum, icmp_id, icmp_seq)
-        
-        # Paketi gönder
-        sock.sendto(icmp_header, (target, 0))
-        
-        # Yanıtı al
-        try:
-            data, addr = sock.recvfrom(1024)
-            # IP header'ından TTL değerini al
-            ttl = struct.unpack('!B', data[8:9])[0]
-            
-            # TTL değerine göre işletim sistemi tahmini
-            if ttl <= 64:
-                print("[*] TTL değeri (64) Linux/Unix işaret ediyor")
-                return "Linux/Unix"
-            elif ttl <= 128:
-                print("[*] TTL değeri (128) Windows işaret ediyor")
-                return "Windows"
-            elif ttl <= 255:
-                print("[*] TTL değeri (255) macOS işaret ediyor")
-                return "macOS"
-        except socket.timeout:
-            print("[!] TTL tespiti için yanıt alınamadı")
-        finally:
-            sock.close()
-    except Exception as e:
-        print(f"[!] TTL tespit hatası: {e}")
-
-    # Eğer TTL tespiti başarısız olursa, diğer yöntemlere geç
-    print("\n[+] Alternatif tespit yöntemleri deneniyor...")
-    print("-" * 60)
 
     try:
         # İşletim sistemi bilgisi verebilecek yaygın portları dene
