@@ -34,7 +34,6 @@ def detect_os(target):
     print(f"[+] Alınan TTL: {ttl}")
     print(f"[+] TCP Window Size: {window}")
 
-    # Heuristik OS tespiti
     if ttl >= 120:
         if 8192 <= window <= 65535:
             os_guess = "Windows"
